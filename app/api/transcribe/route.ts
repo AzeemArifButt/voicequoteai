@@ -2,10 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import Groq from 'groq-sdk';
 import { rateLimit, getClientIp } from '@/lib/rateLimit';
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
-
 // Limits: 15 transcriptions per hour, 50 per day per IP
 const HOURLY_LIMIT = 15;
 const DAILY_LIMIT = 50;
@@ -40,6 +36,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Initialise Groq inside the handler so the env var is always available
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
     // Parse the multipart/form-data — Next.js App Router handles this natively
     const formData = await request.formData();
     const audioEntry = formData.get('audio');
@@ -47,6 +46,14 @@ export async function POST(request: NextRequest) {
     if (!audioEntry || !(audioEntry instanceof Blob)) {
       return NextResponse.json(
         { error: 'No audio file received.' },
+        { status: 400 }
+      );
+    }
+
+    // Reject suspiciously small blobs (under 1 KB = likely empty/corrupt)
+    if (audioEntry.size < 1000) {
+      return NextResponse.json(
+        { error: 'Recording too short. Please hold the mic button and speak for at least 2 seconds.' },
         { status: 400 }
       );
     }
@@ -86,6 +93,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { error: 'Rate limited. Please wait a moment and try again.' },
           { status: 429 }
+        );
+      }
+
+      // Groq rejected the audio (bad format, too short, silent, etc.)
+      if (msg.includes('400') || msg.includes('invalid_request') || msg.includes('could not process') || msg.includes('valid media')) {
+        return NextResponse.json(
+          { error: 'Could not process audio. Please record at least 2 seconds of speech and try again.' },
+          { status: 400 }
         );
       }
     }
