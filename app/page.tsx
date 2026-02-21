@@ -340,12 +340,7 @@ export default function HomePage() {
                 onClientEmailChange={setClientEmail}
                 onTotalPriceChange={setTotalPrice}
                 onLogoChange={setLogoDataUrl}
-                onGenerate={handleGenerateQuote}
-                isGenerating={isGenerating}
                 error={apiError}
-                isPro={isPro}
-                quotesRemaining={quotesRemaining}
-                onUpgrade={() => upgradeToCheckout('pro')}
               />
             </div>
 
@@ -361,6 +356,96 @@ export default function HomePage() {
                 </div>
               </div>
               <MicrophoneButton transcript={transcript} onTranscriptChange={setTranscript} />
+            </div>
+
+            <div style={{ height: '1px', backgroundColor: '#f1f5f9', margin: '0 30px' }} />
+
+            {/* Step 3 — Generate */}
+            <div style={{ padding: '26px 30px 30px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+                <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #1e3a8a, #2563eb)', color: '#fff', fontSize: '12px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 3px 10px rgba(37,99,235,0.45)' }}>3</div>
+                <div>
+                  <p style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.2px', lineHeight: 1 }}>Generate Your Quote</p>
+                  <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '3px' }}>AI writes a professional proposal from your voice note</p>
+                </div>
+              </div>
+
+              {/* Quota indicator (free users) */}
+              {!isPro && quotesRemaining !== null && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', backgroundColor: quotesRemaining === 0 ? '#fef2f2' : '#f0f7ff', borderRadius: '10px', border: `1px solid ${quotesRemaining === 0 ? '#fecaca' : '#bfdbfe'}`, marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <svg style={{ width: '14px', height: '14px', color: quotesRemaining === 0 ? '#ef4444' : '#2563eb', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: quotesRemaining === 0 ? '#dc2626' : '#1e40af' }}>
+                      {quotesRemaining === 0 ? 'Free quote limit reached' : `${quotesRemaining} free quote${quotesRemaining === 1 ? '' : 's'} remaining`}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => upgradeToCheckout('pro')}
+                    style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff', backgroundColor: quotesRemaining === 0 ? '#dc2626' : '#2563eb', border: 'none', borderRadius: '6px', padding: '4px 12px', cursor: 'pointer' }}
+                  >
+                    Upgrade →
+                  </button>
+                </div>
+              )}
+
+              {/* Generate button OR upgrade CTA */}
+              {quotesRemaining === 0 ? (
+                <motion.button
+                  onClick={() => upgradeToCheckout('pro')}
+                  whileTap={{ scale: 0.98 }}
+                  style={{
+                    width: '100%', height: '56px', borderRadius: '14px', border: 'none', cursor: 'pointer',
+                    background: 'linear-gradient(135deg, #C9973B, #EFD89A)',
+                    color: '#7c2d00', fontSize: '15px', fontWeight: 800, letterSpacing: '-0.2px',
+                    boxShadow: '0 4px 20px rgba(201,151,59,0.45)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+                  }}
+                >
+                  <svg style={{ width: '20px', height: '20px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Upgrade to Pro — Unlimited Quotes
+                </motion.button>
+              ) : (
+                <motion.button
+                  onClick={handleGenerateQuote}
+                  disabled={isGenerating}
+                  whileTap={{ scale: 0.98 }}
+                  style={{
+                    width: '100%', height: '56px', borderRadius: '14px', border: 'none', cursor: isGenerating ? 'not-allowed' : 'pointer',
+                    background: isGenerating ? 'linear-gradient(135deg, #93c5fd, #60a5fa)' : 'linear-gradient(135deg, #1d4ed8, #2563eb)',
+                    color: '#ffffff', fontSize: '15px', fontWeight: 700, letterSpacing: '-0.2px',
+                    boxShadow: isGenerating ? 'none' : '0 4px 20px rgba(37,99,235,0.45), 0 1px 4px rgba(0,0,0,0.1)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+                    transition: 'box-shadow 0.15s, background 0.15s',
+                  }}
+                >
+                  {isGenerating ? (
+                    <>
+                      <svg style={{ width: '20px', height: '20px', animation: 'spin 1s linear infinite' }} fill="none" viewBox="0 0 24 24">
+                        <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Generating your proposal...
+                    </>
+                  ) : (
+                    <>
+                      <svg style={{ width: '20px', height: '20px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      Generate Professional Quote ✨
+                      {isPro && <span style={{ fontSize: '10px', fontWeight: 700, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: '4px', padding: '2px 7px', letterSpacing: '0.05em' }}>PRO</span>}
+                    </>
+                  )}
+                </motion.button>
+              )}
+
+              <p style={{ textAlign: 'center', fontSize: '11px', color: '#94a3b8', marginTop: '12px' }}>
+                {isPro ? '✓ Unlimited quotes · Pro plan active' : 'AI-generated · Professional quality · Fast delivery'}
+              </p>
+              <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
             </div>
           </div>
           <p style={{ textAlign: 'center', fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '18px', letterSpacing: '0.02em' }}>
