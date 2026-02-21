@@ -36,10 +36,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Initialise Groq inside the handler so the env var is always available
+    // Initialise Groq inside the handler so env var is always available
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-    // Parse the multipart/form-data — Next.js App Router handles this natively
+    // Parse the multipart/form-data
     const formData = await request.formData();
     const audioEntry = formData.get('audio');
 
@@ -53,34 +53,41 @@ export async function POST(request: NextRequest) {
     // Reject suspiciously small blobs (under 1 KB = likely empty/corrupt)
     if (audioEntry.size < 1000) {
       return NextResponse.json(
-        { error: 'Recording too short. Please hold the mic button and speak for at least 2 seconds.' },
+        { error: 'Recording too short. Please hold the mic and speak for at least 2 seconds.' },
         { status: 400 }
       );
     }
 
-    // Determine the correct file extension from the MIME type
-    // iOS Safari records as audio/mp4; Chrome/Android records as audio/webm
-    const mimeType = audioEntry.type || 'audio/webm';
+    // Fix 1: Strip codec info — browser sends "audio/webm;codecs=opus"
+    // Groq needs plain "audio/webm" without the codec specifier
+    const mimeType = (audioEntry.type || 'audio/webm').split(';')[0];
     const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
 
-    // Groq SDK requires a File object with a proper extension in the filename
     const file = new File([audioEntry], `recording.${ext}`, { type: mimeType });
 
+    // Fix 3: Use response_format 'json' — always returns { text: string }, no ambiguity
     const transcription = await groq.audio.transcriptions.create({
       file,
       model: 'whisper-large-v3-turbo',
-      response_format: 'text',
+      response_format: 'json',
     });
 
-    // When response_format is 'text', the SDK returns a plain string
-    const text = typeof transcription === 'string' ? transcription : (transcription as { text: string }).text;
+    return NextResponse.json({ text: transcription.text?.trim() ?? '' });
 
-    return NextResponse.json({ text: text?.trim() ?? '' });
   } catch (error: unknown) {
     console.error('[transcribe] Error:', error);
 
     if (error instanceof Error) {
       const msg = error.message.toLowerCase();
+      const name = error.name;
+
+      // Fix 2a: Groq SDK network/connection errors
+      if (name === 'APIConnectionError' || name === 'APIConnectionTimeoutError') {
+        return NextResponse.json(
+          { error: 'Could not reach transcription service. Please check your connection and try again.' },
+          { status: 503 }
+        );
+      }
 
       if (msg.includes('401') || msg.includes('authentication') || msg.includes('api key')) {
         return NextResponse.json(
@@ -102,6 +109,17 @@ export async function POST(request: NextRequest) {
           { error: 'Could not process audio. Please record at least 2 seconds of speech and try again.' },
           { status: 400 }
         );
+      }
+
+      // Fix 2b: Groq 422 Unprocessable Entity
+      if ('status' in error) {
+        const status = (error as { status: number }).status;
+        if (status === 422) {
+          return NextResponse.json(
+            { error: 'Audio format not supported. Please try recording again.' },
+            { status: 400 }
+          );
+        }
       }
     }
 
