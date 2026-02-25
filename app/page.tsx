@@ -2,10 +2,13 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ClerkNav from '@/components/ClerkNav';
 import MicrophoneButton from '@/components/MicrophoneButton';
 import QuoteForm from '@/components/QuoteForm';
 import QuotePreview from '@/components/QuotePreview';
+import QuoteHistory from '@/components/QuoteHistory';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useQuoteHistory } from '@/hooks/useQuoteHistory';
 
 export interface QuoteData {
   companyName: string;
@@ -14,6 +17,10 @@ export interface QuoteData {
   totalPrice: string;
   proposalText: string;
   logoDataUrl: string | null;
+  currency: string;
+  templateId: string;
+  quoteRef: string;
+  shareToken: string | null;
 }
 
 const FF = 'ui-sans-serif, system-ui, -apple-system, Arial, sans-serif';
@@ -51,30 +58,84 @@ const HOW_IT_WORKS = [
   },
 ];
 
+const TESTIMONIALS = [
+  {
+    name: 'Marcus T.',
+    role: 'Roofing Contractor',
+    avatar: 'MT',
+    quote: "I used to spend 40 minutes writing quotes. Now I tap the mic, talk for 2 minutes, and it's done. My close rate went up because I send quotes same-day.",
+  },
+  {
+    name: 'Sarah K.',
+    role: 'Freelance Web Designer',
+    avatar: 'SK',
+    quote: "The proposals look way more professional than anything I was writing myself. Clients actually comment on how polished they look. Worth every penny.",
+  },
+  {
+    name: 'David R.',
+    role: 'HVAC Technician',
+    avatar: 'DR',
+    quote: "I'm not great with words but this thing makes me sound like I have a whole office team. Sent 3 quotes in the truck after jobs. Got all 3.",
+  },
+];
+
+const FAQS = [
+  {
+    q: 'Does it work on iPhone?',
+    a: 'Yes, VoiceQuote AI works on all modern browsers including iOS Safari. Simply tap and hold the mic button to record your voice note.',
+  },
+  {
+    q: 'What languages are supported?',
+    a: 'English is fully supported right now. More languages are coming soon — the underlying transcription engine supports 50+ languages already.',
+  },
+  {
+    q: 'Is my data safe?',
+    a: 'Your audio is sent to the transcription API and immediately discarded — we never store recordings. For signed-in users, generated proposals are saved securely to your account.',
+  },
+  {
+    q: 'Can I cancel anytime?',
+    a: 'Yes, absolutely. No contracts, no lock-in. Cancel your subscription any time from your billing portal and you keep access until the end of the paid period.',
+  },
+  {
+    q: 'What does the proposal look like?',
+    a: "Proposals are polished, print-ready documents with your business name, client details, a project description written by AI, and a clear price section — ready to download as a professional PDF.",
+  },
+  {
+    q: 'How does the free plan work?',
+    a: 'Free users get 3 quotes per month with no credit card required. Your quota resets on the 1st of each month. Upgrade to Pro at any time for unlimited quotes.',
+  },
+];
+
 export default function HomePage() {
   const [transcript, setTranscript] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [totalPrice, setTotalPrice] = useState('');
+  const [currency, setCurrency] = useState('USD');
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [quoteData, setQuoteData] = useState<QuoteData | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
 
-  // Restore Access modal state
-  const [showRestore, setShowRestore] = useState(false);
-  const [restoreEmail, setRestoreEmail] = useState('');
-  const [restoreSuccess, setRestoreSuccess] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') === 'success') {
+      setShowPaymentSuccess(true);
+      window.history.replaceState({}, '', '/');
+    }
+  }, []);
+
+  const { history, saveQuote, updateLatestTemplate, clearHistory } = useQuoteHistory();
+  const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
   const {
     isPro,
     quotesRemaining,
     recordQuoteUsed,
     upgradeToCheckout,
-    restoreAccess,
-    isRestoring,
-    restoreError,
   } = useSubscription();
 
   const handleGenerateQuote = async () => {
@@ -88,15 +149,22 @@ export default function HomePage() {
       const response = await fetch('/api/generate-quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcribedText: transcript, clientName, clientEmail, totalPrice }),
+        body: JSON.stringify({ transcribedText: transcript, clientName, clientEmail, totalPrice, currency, companyName }),
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         throw new Error(err.error || `Server error (${response.status})`);
       }
       const data = await response.json();
-      setQuoteData({ companyName, clientName, clientEmail, totalPrice, proposalText: data.proposalText, logoDataUrl });
+      const quoteRef = `QT-${Date.now().toString().slice(-6)}`;
+      setQuoteData({
+        companyName, clientName, clientEmail, totalPrice,
+        proposalText: data.proposalText,
+        logoDataUrl, currency, templateId: '', quoteRef,
+        shareToken: data.shareToken ?? null,
+      });
       recordQuoteUsed();
+      saveQuote({ id: quoteRef, date: new Date().toISOString(), clientName, quoteRef, totalPrice, currency, templateId: '', companyName });
       setTimeout(() => {
         document.getElementById('quote-preview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 150);
@@ -109,17 +177,20 @@ export default function HomePage() {
 
   const handleReset = () => {
     setQuoteData(null); setTranscript(''); setClientName('');
-    setClientEmail(''); setTotalPrice(''); setApiError(null);
+    setClientEmail(''); setTotalPrice(''); setApiError(null); setCurrency('USD');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleRestoreSubmit = async () => {
-    const ok = await restoreAccess(restoreEmail.trim());
-    if (ok) setRestoreSuccess(true);
   };
 
   return (
     <div style={{ minHeight: '100vh', fontFamily: FF, backgroundColor: '#0c1225' }}>
+
+      {/* ══ PAYMENT SUCCESS BANNER ══ */}
+      {showPaymentSuccess && (
+        <div style={{ background: '#16a34a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', padding: '13px 24px', fontSize: '14px', fontWeight: 600 }}>
+          <span>✓ Payment successful! Your Pro plan is now active — enjoy unlimited quotes.</span>
+          <button onClick={() => setShowPaymentSuccess(false)} style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', fontSize: '18px', lineHeight: 1, padding: '0 4px' }}>×</button>
+        </div>
+      )}
 
       {/* ══ HEADER ══ */}
       <motion.header
@@ -151,9 +222,13 @@ export default function HomePage() {
                 ✦ PRO
               </span>
             )}
-            <a href="#create" style={{ fontSize: '13px', fontWeight: 700, color: '#93c5fd', backgroundColor: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: '999px', padding: '6px 18px', textDecoration: 'none' }}>
-              Create Quote →
-            </a>
+            {hasClerk ? (
+              <ClerkNav />
+            ) : (
+              <a href="#create" style={{ fontSize: '13px', fontWeight: 700, color: '#93c5fd', backgroundColor: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: '999px', padding: '6px 18px', textDecoration: 'none' }}>
+                Create Quote →
+              </a>
+            )}
           </div>
         </div>
       </motion.header>
@@ -175,9 +250,23 @@ export default function HomePage() {
               Win More Jobs.<br />
               <span style={{ background: 'linear-gradient(130deg, #60a5fa 0%, #a78bfa 50%, #38bdf8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>Quote Faster.</span>
             </h1>
-            <p style={{ fontSize: '18px', color: 'rgba(255,255,255,0.55)', maxWidth: '460px', margin: '0 auto 44px', lineHeight: 1.72, letterSpacing: '-0.1px' }}>
+            <p style={{ fontSize: '18px', color: 'rgba(255,255,255,0.55)', maxWidth: '460px', margin: '0 auto 36px', lineHeight: 1.72, letterSpacing: '-0.1px' }}>
               Speak your project details out loud. Get a polished, professional proposal and a print-ready PDF in seconds — no typing required.
             </p>
+            {/* ── Primary CTA ── */}
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '28px' }}>
+              <button
+                onClick={() => document.getElementById('create')?.scrollIntoView({ behavior: 'smooth' })}
+                style={{
+                  padding: '16px 36px', borderRadius: '14px', border: 'none', cursor: 'pointer',
+                  background: 'linear-gradient(135deg, #1d4ed8, #2563eb)',
+                  color: '#ffffff', fontSize: '16px', fontWeight: 800, letterSpacing: '-0.2px',
+                  boxShadow: '0 6px 28px rgba(37,99,235,0.55), 0 2px 8px rgba(0,0,0,0.15)',
+                }}
+              >
+                Generate My First Quote Free
+              </button>
+            </div>
             <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
               {[{ icon: '🎙️', text: 'Voice-to-proposal' }, { icon: '⚡', text: 'Under 30 seconds' }, { icon: '📄', text: 'PDF ready instantly' }, { icon: '✏️', text: 'Fully editable' }].map((p) => (
                 <div key={p.text} style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 18px', backgroundColor: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.11)', borderRadius: '999px', backdropFilter: 'blur(8px)' }}>
@@ -213,10 +302,71 @@ export default function HomePage() {
         </motion.div>
       </div>
 
+      {/* ══ TESTIMONIALS ══ */}
+      <div style={{ backgroundColor: '#f0f6ff', padding: '0 24px 80px' }}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.1 }} style={{ maxWidth: '900px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '48px' }}>
+            <p style={{ fontSize: '11px', fontWeight: 800, color: '#2563eb', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px' }}>What our users say</p>
+            <h2 style={{ fontSize: 'clamp(26px, 5vw, 38px)', fontWeight: 900, color: '#0f172a', letterSpacing: '-1.5px', lineHeight: 1.12 }}>Trusted by tradespeople &amp; freelancers</h2>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px' }}>
+            {TESTIMONIALS.map((t, i) => (
+              <motion.div key={t.name} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: 0.1 + i * 0.08 }} style={{ backgroundColor: '#ffffff', borderRadius: '20px', border: '1px solid #e0eaf8', padding: '28px 24px', boxShadow: '0 2px 16px rgba(37,99,235,0.07)' }}>
+                <div style={{ display: 'flex', gap: '3px', marginBottom: '16px' }}>
+                  {[...Array(5)].map((_, s) => (
+                    <span key={s} style={{ color: '#f59e0b', fontSize: '15px' }}>★</span>
+                  ))}
+                </div>
+                <p style={{ fontSize: '14px', color: '#374151', lineHeight: 1.7, marginBottom: '20px', fontStyle: 'italic' }}>
+                  &ldquo;{t.quote}&rdquo;
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'linear-gradient(135deg, #1e3a8a, #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: '13px', flexShrink: 0 }}>
+                    {t.avatar}
+                  </div>
+                  <div>
+                    <p style={{ fontWeight: 700, fontSize: '14px', color: '#0f172a', margin: 0 }}>{t.name}</p>
+                    <p style={{ fontSize: '12px', color: '#64748b', margin: '2px 0 0' }}>{t.role}</p>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+
+      {/* ══ FAQ ══ */}
+      <div style={{ backgroundColor: '#f0f6ff', padding: '0 24px 80px' }}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.1 }} style={{ maxWidth: '720px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '48px' }}>
+            <p style={{ fontSize: '11px', fontWeight: 800, color: '#2563eb', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px' }}>FAQ</p>
+            <h2 style={{ fontSize: 'clamp(26px, 5vw, 38px)', fontWeight: 900, color: '#0f172a', letterSpacing: '-1.5px', lineHeight: 1.12 }}>Common questions</h2>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {FAQS.map((faq, i) => (
+              <div key={i} style={{ backgroundColor: '#ffffff', borderRadius: '16px', border: '1px solid #e0eaf8', overflow: 'hidden', boxShadow: '0 2px 10px rgba(37,99,235,0.05)' }}>
+                <button
+                  onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 24px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', gap: '16px' }}
+                >
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', letterSpacing: '-0.2px' }}>{faq.q}</span>
+                  <span style={{ fontSize: '18px', color: '#2563eb', flexShrink: 0, transform: openFaq === i ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>›</span>
+                </button>
+                {openFaq === i && (
+                  <div style={{ padding: '0 24px 18px' }}>
+                    <p style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.7, margin: 0 }}>{faq.a}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+
       {/* ══ PRICING ══ */}
       <div id="pricing" style={{ backgroundColor: '#f0f6ff', padding: '0 24px 0' }}>
         <div style={{ maxWidth: '920px', margin: '0 auto', paddingBottom: '20px' }}>
-          <div style={{ textAlign: 'center', paddingTop: '72px', marginBottom: '48px' }}>
+          <div style={{ textAlign: 'center', paddingTop: '20px', marginBottom: '48px' }}>
             <p style={{ fontSize: '11px', fontWeight: 800, color: '#2563eb', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px' }}>Pricing</p>
             <h2 style={{ fontSize: 'clamp(26px, 5vw, 38px)', fontWeight: 900, color: '#0f172a', letterSpacing: '-1.5px', lineHeight: 1.12, marginBottom: '14px' }}>Simple, transparent pricing</h2>
             <p style={{ fontSize: '15px', color: '#64748b', maxWidth: '380px', margin: '0 auto' }}>Start free. Upgrade when you&apos;re ready. Cancel anytime.</p>
@@ -301,7 +451,7 @@ export default function HomePage() {
           </div>
 
           <p style={{ textAlign: 'center', fontSize: '11px', color: '#94a3b8', marginTop: '22px', paddingBottom: '12px' }}>
-            No long-term contracts · Secure payment via Stripe · Cancel anytime
+            No long-term contracts · Secure payment via Paddle · Cancel anytime
           </p>
         </div>
 
@@ -320,7 +470,7 @@ export default function HomePage() {
 
         <motion.div initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.08 }} style={{ maxWidth: '620px', margin: '0 auto', position: 'relative' }}>
           <div style={{ backgroundColor: '#ffffff', borderRadius: '24px', boxShadow: '0 24px 80px rgba(0,0,0,0.35), 0 4px 16px rgba(0,0,0,0.2)', overflow: 'hidden' }}>
-            {/* Step 1 — Details first */}
+            {/* Step 1 */}
             <div style={{ padding: '30px 30px 26px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '22px' }}>
                 <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #1e3a8a, #2563eb)', color: '#fff', fontSize: '12px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 3px 10px rgba(37,99,235,0.45)' }}>1</div>
@@ -330,23 +480,17 @@ export default function HomePage() {
                 </div>
               </div>
               <QuoteForm
-                companyName={companyName}
-                clientName={clientName}
-                clientEmail={clientEmail}
-                totalPrice={totalPrice}
-                logoDataUrl={logoDataUrl}
-                onCompanyNameChange={setCompanyName}
-                onClientNameChange={setClientName}
-                onClientEmailChange={setClientEmail}
-                onTotalPriceChange={setTotalPrice}
-                onLogoChange={setLogoDataUrl}
-                error={apiError}
+                companyName={companyName} clientName={clientName} clientEmail={clientEmail}
+                totalPrice={totalPrice} logoDataUrl={logoDataUrl} currency={currency}
+                onCompanyNameChange={setCompanyName} onClientNameChange={setClientName}
+                onClientEmailChange={setClientEmail} onTotalPriceChange={setTotalPrice}
+                onLogoChange={setLogoDataUrl} onCurrencyChange={setCurrency} error={apiError}
               />
             </div>
 
             <div style={{ height: '1px', backgroundColor: '#f1f5f9', margin: '0 30px' }} />
 
-            {/* Step 2 — Voice note */}
+            {/* Step 2 */}
             <div style={{ padding: '26px 30px 30px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
                 <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #1e3a8a, #2563eb)', color: '#fff', fontSize: '12px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 3px 10px rgba(37,99,235,0.45)' }}>2</div>
@@ -360,7 +504,7 @@ export default function HomePage() {
 
             <div style={{ height: '1px', backgroundColor: '#f1f5f9', margin: '0 30px' }} />
 
-            {/* Step 3 — Generate */}
+            {/* Step 3 */}
             <div style={{ padding: '26px 30px 30px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
                 <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #1e3a8a, #2563eb)', color: '#fff', fontSize: '12px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 3px 10px rgba(37,99,235,0.45)' }}>3</div>
@@ -370,7 +514,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* Quota indicator (free users) */}
               {!isPro && quotesRemaining !== null && (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', backgroundColor: quotesRemaining === 0 ? '#fef2f2' : '#f0f7ff', borderRadius: '10px', border: `1px solid ${quotesRemaining === 0 ? '#fecaca' : '#bfdbfe'}`, marginBottom: '14px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -381,47 +524,19 @@ export default function HomePage() {
                       {quotesRemaining === 0 ? 'Free quote limit reached' : `${quotesRemaining} free quote${quotesRemaining === 1 ? '' : 's'} remaining`}
                     </span>
                   </div>
-                  <button
-                    onClick={() => upgradeToCheckout('pro')}
-                    style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff', backgroundColor: quotesRemaining === 0 ? '#dc2626' : '#2563eb', border: 'none', borderRadius: '6px', padding: '4px 12px', cursor: 'pointer' }}
-                  >
+                  <button onClick={() => upgradeToCheckout('pro')} style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff', backgroundColor: quotesRemaining === 0 ? '#dc2626' : '#2563eb', border: 'none', borderRadius: '6px', padding: '4px 12px', cursor: 'pointer' }}>
                     Upgrade →
                   </button>
                 </div>
               )}
 
-              {/* Generate button OR upgrade CTA */}
               {quotesRemaining === 0 ? (
-                <motion.button
-                  onClick={() => upgradeToCheckout('pro')}
-                  whileTap={{ scale: 0.98 }}
-                  style={{
-                    width: '100%', height: '56px', borderRadius: '14px', border: 'none', cursor: 'pointer',
-                    background: 'linear-gradient(135deg, #C9973B, #EFD89A)',
-                    color: '#7c2d00', fontSize: '15px', fontWeight: 800, letterSpacing: '-0.2px',
-                    boxShadow: '0 4px 20px rgba(201,151,59,0.45)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
-                  }}
-                >
-                  <svg style={{ width: '20px', height: '20px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
+                <motion.button onClick={() => upgradeToCheckout('pro')} whileTap={{ scale: 0.98 }} style={{ width: '100%', height: '56px', borderRadius: '14px', border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg, #C9973B, #EFD89A)', color: '#7c2d00', fontSize: '15px', fontWeight: 800, letterSpacing: '-0.2px', boxShadow: '0 4px 20px rgba(201,151,59,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                  <svg style={{ width: '20px', height: '20px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                   Upgrade to Pro — Unlimited Quotes
                 </motion.button>
               ) : (
-                <motion.button
-                  onClick={handleGenerateQuote}
-                  disabled={isGenerating}
-                  whileTap={{ scale: 0.98 }}
-                  style={{
-                    width: '100%', height: '56px', borderRadius: '14px', border: 'none', cursor: isGenerating ? 'not-allowed' : 'pointer',
-                    background: isGenerating ? 'linear-gradient(135deg, #93c5fd, #60a5fa)' : 'linear-gradient(135deg, #1d4ed8, #2563eb)',
-                    color: '#ffffff', fontSize: '15px', fontWeight: 700, letterSpacing: '-0.2px',
-                    boxShadow: isGenerating ? 'none' : '0 4px 20px rgba(37,99,235,0.45), 0 1px 4px rgba(0,0,0,0.1)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
-                    transition: 'box-shadow 0.15s, background 0.15s',
-                  }}
-                >
+                <motion.button onClick={handleGenerateQuote} disabled={isGenerating} whileTap={{ scale: 0.98 }} style={{ width: '100%', height: '56px', borderRadius: '14px', border: 'none', cursor: isGenerating ? 'not-allowed' : 'pointer', background: isGenerating ? 'linear-gradient(135deg, #93c5fd, #60a5fa)' : 'linear-gradient(135deg, #1d4ed8, #2563eb)', color: '#ffffff', fontSize: '15px', fontWeight: 700, letterSpacing: '-0.2px', boxShadow: isGenerating ? 'none' : '0 4px 20px rgba(37,99,235,0.45), 0 1px 4px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', transition: 'box-shadow 0.15s, background 0.15s' }}>
                   {isGenerating ? (
                     <>
                       <svg style={{ width: '20px', height: '20px', animation: 'spin 1s linear infinite' }} fill="none" viewBox="0 0 24 24">
@@ -432,9 +547,7 @@ export default function HomePage() {
                     </>
                   ) : (
                     <>
-                      <svg style={{ width: '20px', height: '20px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                      </svg>
+                      <svg style={{ width: '20px', height: '20px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                       Generate Professional Quote ✨
                       {isPro && <span style={{ fontSize: '10px', fontWeight: 700, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: '4px', padding: '2px 7px', letterSpacing: '0.05em' }}>PRO</span>}
                     </>
@@ -449,9 +562,10 @@ export default function HomePage() {
             </div>
           </div>
           <p style={{ textAlign: 'center', fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '18px', letterSpacing: '0.02em' }}>
-            🔒 Your data is never stored &nbsp;·&nbsp; Works on iOS, Android &amp; Desktop
+            🔒 Voice recordings are never stored &nbsp;·&nbsp; Works on iOS, Android &amp; Desktop
           </p>
         </motion.div>
+        <QuoteHistory history={history} onClear={clearHistory} />
       </div>
 
       {/* ══ QUOTE PREVIEW ══ */}
@@ -466,7 +580,15 @@ export default function HomePage() {
             style={{ backgroundColor: '#f0f6ff', padding: '0 20px 72px' }}
           >
             <div style={{ maxWidth: '880px', margin: '0 auto', paddingTop: '52px' }}>
-              <QuotePreview quoteData={quoteData} onReset={handleReset} />
+              <QuotePreview
+                quoteData={quoteData}
+                onReset={handleReset}
+                isPro={isPro}
+                onTemplateChange={(tplId) => {
+                  setQuoteData((prev) => prev ? { ...prev, templateId: tplId } : prev);
+                  updateLatestTemplate(tplId);
+                }}
+              />
             </div>
           </motion.div>
         )}
@@ -483,74 +605,18 @@ export default function HomePage() {
           <p style={{ fontSize: '14px', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.3px' }}>VoiceQuote AI</p>
         </div>
         <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.3)', marginTop: '2px' }}>© 2026 · All rights reserved</p>
-        <button
-          onClick={() => { setShowRestore(true); setRestoreSuccess(false); setRestoreEmail(''); }}
-          style={{ marginTop: '12px', fontSize: '11px', color: 'rgba(255,255,255,0.35)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-        >
-          Restore Pro Access
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginTop: '14px', flexWrap: 'wrap' }}>
+          {[
+            { href: '/privacy-policy', label: 'Privacy Policy' },
+            { href: '/terms-and-conditions', label: 'Terms & Conditions' },
+            { href: '/refund-policy', label: 'Refund Policy' },
+          ].map((link) => (
+            <a key={link.href} href={link.href} style={{ fontSize: '11px', color: 'rgba(255,255,255,0.35)', textDecoration: 'none' }}>
+              {link.label}
+            </a>
+          ))}
+        </div>
       </footer>
-
-      {/* ══ RESTORE ACCESS MODAL ══ */}
-      <AnimatePresence>
-        {showRestore && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '20px' }}
-            onClick={(e) => { if (e.target === e.currentTarget) setShowRestore(false); }}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.92, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.92, y: 16 }}
-              style={{ backgroundColor: '#ffffff', borderRadius: '20px', padding: '32px', maxWidth: '400px', width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,0.4)' }}
-            >
-              {restoreSuccess ? (
-                <>
-                  <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                    <svg style={{ width: '28px', height: '28px', color: '#16a34a' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                  </div>
-                  <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', textAlign: 'center', marginBottom: '8px' }}>Pro Access Restored!</h3>
-                  <p style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', marginBottom: '20px' }}>Your Pro subscription has been verified and is now active in this browser.</p>
-                  <button onClick={() => setShowRestore(false)} style={{ width: '100%', height: '44px', borderRadius: '10px', border: 'none', background: 'linear-gradient(135deg, #1d4ed8, #2563eb)', color: '#ffffff', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>
-                    Back to App
-                  </button>
-                </>
-              ) : (
-                <>
-                  <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}>Restore Pro Access</h3>
-                  <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px', lineHeight: 1.5 }}>Enter the email you used when subscribing to verify your active subscription.</p>
-                  <input
-                    type="email"
-                    value={restoreEmail}
-                    onChange={(e) => setRestoreEmail(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && restoreEmail) handleRestoreSubmit(); }}
-                    placeholder="your@email.com"
-                    style={{ width: '100%', height: '44px', borderRadius: '10px', border: '1.5px solid #e2e8f0', padding: '0 12px', fontSize: '14px', marginBottom: '12px', outline: 'none', boxSizing: 'border-box' }}
-                  />
-                  {restoreError && (
-                    <p style={{ fontSize: '12px', color: '#dc2626', marginBottom: '10px' }}>{restoreError}</p>
-                  )}
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <button onClick={() => setShowRestore(false)} style={{ flex: 1, height: '44px', borderRadius: '10px', border: '1.5px solid #e2e8f0', backgroundColor: '#ffffff', color: '#374151', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleRestoreSubmit}
-                      disabled={!restoreEmail || isRestoring}
-                      style={{ flex: 2, height: '44px', borderRadius: '10px', border: 'none', background: !restoreEmail || isRestoring ? '#e2e8f0' : 'linear-gradient(135deg, #1d4ed8, #2563eb)', color: !restoreEmail || isRestoring ? '#94a3b8' : '#ffffff', fontSize: '13px', fontWeight: 700, cursor: !restoreEmail || isRestoring ? 'not-allowed' : 'pointer' }}
-                    >
-                      {isRestoring ? 'Checking…' : 'Restore Access'}
-                    </button>
-                  </div>
-                </>
-              )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
     </div>
   );

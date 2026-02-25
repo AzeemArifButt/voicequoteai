@@ -29,7 +29,6 @@ function readSub(): SubData | null {
     const raw = localStorage.getItem(SUB_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw) as SubData;
-    // Expired — treat as free
     if (new Date(data.expiresAt) < new Date()) {
       localStorage.removeItem(SUB_KEY);
       return null;
@@ -45,7 +44,6 @@ function readUsage(): UsageData {
     const raw = localStorage.getItem(USAGE_KEY);
     if (!raw) return { count: 0, month: currentMonth() };
     const data = JSON.parse(raw) as UsageData;
-    // Reset if new month
     if (data.month !== currentMonth()) {
       return { count: 0, month: currentMonth() };
     }
@@ -61,7 +59,6 @@ export function useSubscription() {
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
 
-  // Read from localStorage on mount (client-only)
   useEffect(() => {
     setSub(readSub());
     setUsage(readUsage());
@@ -78,23 +75,47 @@ export function useSubscription() {
     setUsage(newUsage);
   }, [isPro, usage.count]);
 
-  const upgradeToCheckout = useCallback((plan: 'pro' | 'business') => {
-    const url =
+  /**
+   * Open Paddle checkout overlay for Pro or Business plan.
+   * Paddle.js is initialized globally by PaddleProvider in layout.tsx.
+   */
+  const upgradeToCheckout = useCallback((plan: 'pro' | 'business', email?: string) => {
+    const priceId =
       plan === 'business'
-        ? process.env.NEXT_PUBLIC_LEMON_BUSINESS_URL
-        : process.env.NEXT_PUBLIC_LEMON_PRO_URL;
-    if (url) {
-      window.location.href = url;
-    } else {
-      alert('Checkout not configured yet. Please contact support.');
+        ? process.env.NEXT_PUBLIC_PADDLE_BUSINESS_PRICE_ID
+        : process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID;
+
+    if (!priceId || priceId === 'pri_PLACEHOLDER' || !priceId.startsWith('pri_')) {
+      alert('Checkout coming soon! We are finalising our payment setup. Check back shortly.');
+      return;
     }
+
+    // window.Paddle is set by PaddleProvider via @paddle/paddle-js initializePaddle
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const paddle = (window as any).Paddle;
+    if (!paddle) {
+      alert('Payment system is loading. Please try again in a moment.');
+      return;
+    }
+
+    paddle.Checkout.open({
+      items: [{ priceId, quantity: 1 }],
+      ...(email ? { customer: { email } } : {}),
+      settings: {
+        successUrl: `${window.location.origin}/?payment=success`,
+      },
+    });
   }, []);
 
+  /**
+   * Restore Pro access by looking up a Paddle subscription by email.
+   * Falls back to localStorage to persist the restored status in this browser.
+   */
   const restoreAccess = useCallback(async (email: string): Promise<boolean> => {
     setIsRestoring(true);
     setRestoreError(null);
     try {
-      const res = await fetch('/api/lemon/restore-access', {
+      const res = await fetch('/api/paddle/restore-access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),

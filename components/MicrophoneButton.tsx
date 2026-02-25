@@ -119,9 +119,15 @@ export default function MicrophoneButton({
     }
   }, []);
 
-  const handleMicClick = () => {
+  // Hold-to-record: prevent accidental/abusive toggling
+  const handlePressStart = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    if (state === 'idle') startRecording();
+  };
+
+  const handlePressEnd = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
     if (state === 'recording') stopRecording();
-    else if (state === 'idle') startRecording();
   };
 
   const wordCount = transcript.trim().split(/\s+/).filter(Boolean).length;
@@ -131,14 +137,18 @@ export default function MicrophoneButton({
       {/* Microphone Button */}
       <div className="flex flex-col items-center gap-4 py-2">
         <motion.button
-          onClick={handleMicClick}
+          onMouseDown={handlePressStart}
+          onMouseUp={handlePressEnd}
+          onMouseLeave={state === 'recording' ? handlePressEnd : undefined}
+          onTouchStart={handlePressStart}
+          onTouchEnd={handlePressEnd}
           disabled={state === 'transcribing'}
           whileTap={state !== 'transcribing' ? { scale: 0.92 } : undefined}
           whileHover={state !== 'transcribing' ? { scale: 1.06 } : undefined}
           transition={{ type: 'spring', stiffness: 400, damping: 20 }}
           className={[
             'relative w-24 h-24 rounded-full flex items-center justify-center',
-            'shadow-xl transition-colors duration-200',
+            'shadow-xl transition-colors duration-200 select-none',
             'focus:outline-none focus-visible:ring-4 focus-visible:ring-offset-2',
             state === 'recording'
               ? 'bg-red-500 animate-mic-pulse focus-visible:ring-red-300'
@@ -147,9 +157,9 @@ export default function MicrophoneButton({
               : 'bg-primary hover:bg-blue-600 focus-visible:ring-blue-300',
           ].join(' ')}
           aria-label={
-            state === 'recording' ? 'Stop recording'
+            state === 'recording' ? 'Release to stop recording'
             : state === 'transcribing' ? 'Transcribing…'
-            : 'Start recording'
+            : 'Hold to record'
           }
         >
           {state === 'transcribing' ? (
@@ -179,7 +189,7 @@ export default function MicrophoneButton({
                 <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                 Recording · {formatTime(seconds)}
               </Badge>
-              <p className="text-xs text-gray-400">Tap to stop</p>
+              <p className="text-xs text-gray-400">Release to stop</p>
             </motion.div>
           ) : state === 'transcribing' ? (
             <motion.div
@@ -201,7 +211,7 @@ export default function MicrophoneButton({
               exit={{ opacity: 0 }}
               className="text-sm text-gray-500 text-center"
             >
-              Tap the mic and describe your project out loud
+              Hold the mic to record your project description
             </motion.p>
           )}
         </AnimatePresence>

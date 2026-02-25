@@ -5,17 +5,29 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+const CURRENCIES = [
+  { code: 'USD', symbol: '$' },
+  { code: 'EUR', symbol: '€' },
+  { code: 'GBP', symbol: '£' },
+  { code: 'CAD', symbol: '$' },
+  { code: 'AUD', symbol: '$' },
+  { code: 'JPY', symbol: '¥' },
+  { code: 'INR', symbol: '₹' },
+];
+
 interface QuoteFormProps {
   companyName: string;
   clientName: string;
   clientEmail: string;
   totalPrice: string;
   logoDataUrl: string | null;
+  currency: string;
   onCompanyNameChange: (v: string) => void;
   onClientNameChange: (v: string) => void;
   onClientEmailChange: (v: string) => void;
   onTotalPriceChange: (v: string) => void;
   onLogoChange: (dataUrl: string | null) => void;
+  onCurrencyChange: (v: string) => void;
   error: string | null;
 }
 
@@ -25,11 +37,13 @@ export default function QuoteForm({
   clientEmail,
   totalPrice,
   logoDataUrl,
+  currency,
   onCompanyNameChange,
   onClientNameChange,
   onClientEmailChange,
   onTotalPriceChange,
   onLogoChange,
+  onCurrencyChange,
   error,
 }: QuoteFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -184,9 +198,30 @@ export default function QuoteForm({
       </div>
 
       <div>
-        <label style={labelStyle}>Total Price <span style={{ color: '#ef4444' }}>*</span></label>
+        <label style={labelStyle}>Currency &amp; Total Price <span style={{ color: '#ef4444' }}>*</span></label>
+        {/* Currency pills */}
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+          {CURRENCIES.map((c) => (
+            <button
+              key={c.code}
+              type="button"
+              onClick={() => onCurrencyChange(c.code)}
+              style={{
+                padding: '3px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 700,
+                border: `1.5px solid ${currency === c.code ? '#2563eb' : '#e2e8f0'}`,
+                backgroundColor: currency === c.code ? '#eff6ff' : '#ffffff',
+                color: currency === c.code ? '#1d4ed8' : '#64748b',
+                cursor: 'pointer', transition: 'all 0.12s',
+              }}
+            >
+              {c.code}
+            </button>
+          ))}
+        </div>
         <div style={{ position: 'relative' }}>
-          <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontWeight: 700, fontSize: '15px', userSelect: 'none', pointerEvents: 'none' }}>$</span>
+          <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontWeight: 700, fontSize: '15px', userSelect: 'none', pointerEvents: 'none' }}>
+            {CURRENCIES.find((c) => c.code === currency)?.symbol ?? '$'}
+          </span>
           <Input
             value={totalPrice}
             onChange={(e) => onTotalPriceChange(e.target.value)}
